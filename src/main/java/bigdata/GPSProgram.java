@@ -1,14 +1,18 @@
 package bigdata;
 
+import org.apache.commons.math.geometry.Vector3D;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.SortedList;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
+import scala.Tuple3;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 
 public class GPSProgram {
@@ -73,36 +77,58 @@ public class GPSProgram {
         JavaPairRDD<String, Tuple2<Integer, Integer>> rdd2 = rdd1.mapValues(v -> {
             int posX = (int) (v.shiftX * (TILE_SIZE - 1));
             int posY = (int) (v.shiftY * (TILE_SIZE - 1));
-            if(posX < 0 || posY < 0){
-                System.out.println("negative postions : "+ posX + ";" + posY);
-            }
             return new Tuple2<>(posX, posY);
         });
 
         //Dans l'idée il faut aggréger les points par tuiles
         // Il y a peut etre moyen d'optimiser, voir avec Adrien pour une équivalence fonctionnelle plus adaptée
         // Puis il faut voir comment fonctionne groupByKey, si y'a besoin d'un equals ou d'un compareTo ...
-        JavaPairRDD<String, Iterable<Tuple2<Integer, Integer>>> rdd3 = rdd2.groupByKey(); // ??
 
-        // On crée la tuile du point pour simplifier le traitement (j'avais la flemme de penser autrement
-        // puis ca sera plus simple pour plus tard
-        JavaPairRDD<String, int[]> rdd4 = rdd3.mapValues(it -> {
-            int[] tile = new int[TILE_SIZE * TILE_SIZE];
-            Arrays.fill(tile, 0);
-            it.forEach(tuple -> {
-                int x = tuple._1;
-                int y = tuple._2;
-                int index = x + y * TILE_SIZE;
-                tile[index] = tile[index] + 1;
-            });
-            return tile;
-        }).persist(StorageLevel.DISK_ONLY());
+        //JavaPairRDD<String, Iterable<Tuple2<Integer, Integer>>> rdd3 = rdd2.groupByKey(); // ??
 
-        JavaPairRDD<String, byte[]> rdd5 = rdd4.mapValues(tile -> {
-            int length = tile.length;
-            ByteBuffer bb = ByteBuffer.allocate(length * Integer.BYTES);
-            for (int i = 0; i < length; ++i) {
-                bb.putInt(tile[i]);
+        JavaPairRDD<String, ArrayList<T3>> rdd3 = rdd2.combineByKey(tu -> {
+            ArrayList<T3> arr = new ArrayList<>();
+            T3 t3 = new T3(tu._1, tu._2, 1);
+            arr.add(t3);
+            return arr;
+        }, (arr, pixel) -> {
+            boolean isPresent = false;
+            for (T3 t3 : arr) {
+                if (t3.x == pixel._1 && t3.y == pixel._2) {
+                    t3.setValue(t3.value + 1);
+                    isPresent = true;
+                }
+            }
+            if (!isPresent) {
+                arr.add(new T3(pixel._1, pixel._2, 1));
+            }
+            return arr;
+        }, (arr1, arr2) -> {
+            ArrayList<T3> arrFinal = new ArrayList<>();
+            for (T3 t : arr1) {
+                T3 tmp = null;
+                for (T3 t2 : arr2) {
+                    if (t.x == t2.x && t.y == t2.y) {
+                        t.setValue(t.value + t2.value);
+                        tmp = t2;
+                        break;
+                    }
+                }
+                arr2.remove(tmp);
+                arrFinal.add(t);
+            }
+            arrFinal.addAll(arr2);
+            return arrFinal;
+        }); // à cacher
+
+
+        JavaPairRDD<String, byte[]> rdd5 = rdd3.mapValues(tile -> {
+            ByteBuffer bb = ByteBuffer.allocate(tile.size() * 3 * Integer.BYTES);
+
+            for (T3 t : tile) {
+                bb.putInt(t.x);
+                bb.putInt(t.y);
+                bb.putInt(t.value);
             }
             return bb.array();
         });
@@ -116,7 +142,7 @@ public class GPSProgram {
             // On commence les aggrégations des résultats précédents, il faut peut etre mettre en cache le rdd4 pour l'envoyer en
             // BDD, similaire au groupeByKey, il faut regarder ce qu'il faut quand on utilise des objets customs pour que ca fonctionne
             // equals ? compareTo ?...
-            JavaPairRDD<String, Iterable<Tuple2<String, int[]>>> rdd5Aggr = rdd4.groupBy(t -> {
+            JavaPairRDD<String, Iterable<Tuple2<String, ArrayList<T3>>>> rdd5Aggr = rdd3.groupBy(t -> {
                 String[] coords = t._1.split("-");
                 int newX = Integer.valueOf(coords[0]) / 2;
                 int newY = Integer.valueOf(coords[1]) / 2;
@@ -124,11 +150,23 @@ public class GPSProgram {
             });
 
 
+            rdd5Aggr.mapValues(v -> {
+               v.forEach(t -> {
+                   String key = t._1;
+                   //Calcul du shift X/Y
+                   ArrayList<T3> points = t._2;
+                   points.forEach(p -> {
+                       p.x = p.x / 2 + shiftX;
+                       p.y = p.y / 2 + shiftY;
+                   });
+                   // Créer une map pour garder en mémoire les points qu'on veut merge...
+
+               });
+            });
+
             // Ici le but est de composer la grande tuile
             // Et de recopier chaque mini tuile dans la grande tuile dans le bon coin.
             JavaPairRDD<String, int[]> rdd6Aggr = rdd5Aggr.mapValues(it -> {
-                int[] newTile = new int[TILE_SIZE * TILE_SIZE * 4];
-                Arrays.fill(newTile, 0);
                 it.forEach(tuple -> {
                     String[] coords = tuple._1.split("-");
                     int coordX = Integer.parseInt(coords[0]);
