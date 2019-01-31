@@ -1,14 +1,18 @@
 package bigdata;
 
+import org.apache.commons.math.geometry.Vector3D;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.SortedList;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
+import scala.Tuple3;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 
 public class GPSProgram {
@@ -131,7 +135,6 @@ public class GPSProgram {
                 int newY = Integer.valueOf(coords[1]) / 2;
                 return newX + "-" + newY + "-" + (Integer.valueOf(coords[2]) + 1);
             });
-
 
             // Ici le but est de composer la grande tuile
             // Et de recopier chaque mini tuile dans la grande tuile dans le bon coin.
