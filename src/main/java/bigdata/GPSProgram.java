@@ -63,22 +63,21 @@ public class GPSProgram {
             //Rethink this when equal 0 ....
             float shiftX;
             float shiftY;
-            if (nsKey < 0) { // if south
-                nsKey = 90 + Math.abs(nsKey);
+            if (ns <= 0) { // if south
+                nsKey = 91 + Math.abs(nsKey);
                 shiftY = ((ns / 10000f) % 1);
             } else {
-                nsKey = 90 - nsKey;
+                nsKey = 91 - (nsKey + 1);
                 shiftY = 1 - ((Math.abs(ns) / 10000f) % 1);
             }
 
-            if (weKey < 0) {  //if west
-                weKey = 180 - Math.abs(weKey);
+            if (we < 0) {  //if west
+                weKey = Math.max(0, 180 - (Math.abs(weKey) + 1));
                 shiftX = 1 - ((Math.abs(we) / 10000f) % 1);
             } else {
                 weKey = 180 + weKey;
                 shiftX = (we / 10000f) % 1;
             }
-            Coord k = new Coord((int)weKey, (int)nsKey, 0);
             String key = (int)weKey + "-" + (int)nsKey + "-" + 0;
             Value v = new Value(Math.abs(shiftX), Math.abs(shiftY)); // pourcentage entre 0 et 1
             return new Tuple2<>(key, v);
@@ -131,9 +130,9 @@ public class GPSProgram {
             // equals ? compareTo ?...
             JavaPairRDD<String, Iterable<Tuple2<String, boolean[]>>> rdd5Aggr = rdd4.groupBy(t -> {
                 String[] coords = t._1.split("-");
-                int newX = Integer.valueOf(coords[0]) / 2;
-                int newY = Integer.valueOf(coords[1]) / 2;
-                return newX + "-" + newY + "-" + (Integer.valueOf(coords[2]) + 1);
+                int newX = Integer.parseInt(coords[0]) / 2;
+                int newY = Integer.parseInt(coords[1]) / 2;
+                return newX + "-" + newY + "-" + (Integer.parseInt(coords[2]) + 1);
             });
 
             // Ici le but est de composer la grande tuile
